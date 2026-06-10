@@ -9,17 +9,25 @@
   const MAX_WAVE_SAMPLES = 1000;
   const MAX_RAW_CALIBRATION_SAMPLES = 200;
   const MAX_CSV_ROWS = 20000;
+  const MAX_LOG_LINES = 120;
+  const MAX_MINIMAL_TEXT_CHARS = 5000;
 
   const telemetryPattern = /^([a-zA-Z]+)\s*:\s*(-?(?:\d+(?:[.,]\d+)?|[.,]\d+))\s*$/;
   const decoder = new TextDecoder("utf-8");
 
   const ui = {};
+  const logLines = [];
 
   let bluetoothDevice = null;
   let txCharacteristic = null;
   let rxCharacteristic = null;
+  let activeNotificationHandler = null;
   let receiveBuffer = "";
+  let minimalText = "";
   let hasBluetoothSupport = false;
+  let hasSecureContext = false;
+  let currentStage = "checking support";
+  let currentMode = "app";
 
   let zeroOffset = 0;
   let lastWave = 0;
@@ -47,6 +55,7 @@
     bindElements();
     bindActions();
     setupCanvas();
+    updateStaticDiagnostics();
     checkBluetoothSupport();
     updateMetrics();
     drawGraph();
@@ -56,6 +65,7 @@
     ui.body = document.body;
     ui.status = document.getElementById("connectionStatus");
     ui.connectButton = document.getElementById("connectButton");
+    ui.minimalBleButton = document.getElementById("minimalBleButton");
     ui.disconnectButton = document.getElementById("disconnectButton");
     ui.calibrateButton = document.getElementById("calibrateButton");
     ui.clearButton = document.getElementById("clearButton");
@@ -68,10 +78,22 @@
     ui.offsetBadge = document.getElementById("offsetBadge");
     ui.canvas = document.getElementById("waveCanvas");
     ui.context = ui.canvas.getContext("2d");
+    ui.diagBluetooth = document.getElementById("diagBluetooth");
+    ui.diagAvailability = document.getElementById("diagAvailability");
+    ui.diagSecure = document.getElementById("diagSecure");
+    ui.diagBrowser = document.getElementById("diagBrowser");
+    ui.diagPlatform = document.getElementById("diagPlatform");
+    ui.diagDeviceName = document.getElementById("diagDeviceName");
+    ui.diagDeviceId = document.getElementById("diagDeviceId");
+    ui.diagStage = document.getElementById("diagStage");
+    ui.diagLog = document.getElementById("diagLog");
+    ui.diagError = document.getElementById("diagError");
+    ui.minimalData = document.getElementById("minimalData");
   }
 
   function bindActions() {
-    ui.connectButton.addEventListener("click", connectMicrobit);
+    ui.connectButton.addEventListener("click", () => connectUart("app"));
+    ui.minimalBleButton.addEventListener("click", () => connectUart("minimal"));
     ui.disconnectButton.addEventListener("click", disconnectMicrobit);
     ui.calibrateButton.addEventListener("click", calibrateApp);
     ui.clearButton.addEventListener("click", clearData);
@@ -88,72 +110,124 @@
     window.addEventListener("resize", scheduleDraw);
   }
 
-  function checkBluetoothSupport() {
+  function updateStaticDiagnostics() {
+    hasSecureContext = Boolean(window.isSecureContext);
+    setDiagnosticText("diagSecure", hasSecureContext ? "sim" : "não");
+    setDiagnosticText("diagBrowser", detectBrowser());
+    setDiagnosticText("diagPlatform", detectPlatform());
+    setStage("checking support");
+    appendLog("Diagnóstico iniciado.");
+  }
+
+  async function checkBluetoothSupport() {
+    setStage("checking support");
     hasBluetoothSupport = Boolean(navigator.bluetooth);
+    setDiagnosticText("diagBluetooth", hasBluetoothSupport ? "sim" : "não");
 
     if (!hasBluetoothSupport) {
+      setDiagnosticText("diagAvailability", "não consultado");
+      setButtonsAvailable(false);
       setStatus(
         "Este navegador não expõe Web Bluetooth. Use Chrome/Edge ou Bluefy no iPhone.",
         "error",
       );
-      ui.connectButton.disabled = true;
+      appendLog("navigator.bluetooth não existe neste navegador.");
       return;
     }
 
-    if (!window.isSecureContext) {
+    if (typeof navigator.bluetooth.getAvailability === "function") {
+      try {
+        const isAvailable = await navigator.bluetooth.getAvailability();
+        setDiagnosticText("diagAvailability", isAvailable ? "disponível" : "indisponível");
+        appendLog(`Bluetooth adapter: ${isAvailable ? "disponível" : "indisponível"}.`);
+      } catch (error) {
+        setDiagnosticText("diagAvailability", "erro ao consultar");
+        recordError(error);
+      }
+    } else {
+      setDiagnosticText("diagAvailability", "API não disponível");
+    }
+
+    if (!hasSecureContext) {
+      setButtonsAvailable(false);
       setStatus("Web Bluetooth exige HTTPS ou localhost. Abra por GitHub Pages ou servidor local.", "error");
-      ui.connectButton.disabled = true;
+      appendLog("Contexto inseguro: Web Bluetooth não pode abrir o seletor.");
       return;
     }
 
-    setStatus("Pronto para conectar ao micro:bit.", "idle");
-    ui.connectButton.disabled = false;
+    setButtonsAvailable(true);
+    setStatus("Pronto para abrir o seletor BLE.", "idle");
   }
 
-  async function connectMicrobit() {
-    if (!hasBluetoothSupport) {
-      checkBluetoothSupport();
+  async function connectUart(mode) {
+    if (!hasBluetoothSupport || !hasSecureContext) {
+      await checkBluetoothSupport();
       return;
     }
 
+    currentMode = mode;
+    resetConnectionState();
     setConnectingState(true);
-    setStatus("Selecionando micro:bit...", "idle");
+    clearLastError();
+
+    if (mode === "minimal") {
+      minimalText = "";
+      ui.minimalData.textContent = "";
+      appendLog("Iniciando teste BLE mínimo.");
+    } else {
+      appendLog("Iniciando conexão do app principal.");
+    }
 
     try {
+      setStage("requesting device");
+      setStatus("Abrindo seletor BLE. Escolha o micro:bit manualmente.", "idle");
+
       bluetoothDevice = await navigator.bluetooth.requestDevice({
-        filters: [
-          { services: [UART_SERVICE_UUID] },
-          { namePrefix: "BBC micro:bit" },
-          { namePrefix: "micro:bit" },
-        ],
+        acceptAllDevices: true,
         optionalServices: [UART_SERVICE_UUID],
       });
 
+      updateDeviceDiagnostics(bluetoothDevice);
       bluetoothDevice.addEventListener("gattserverdisconnected", handleDisconnected);
-      setStatus(`Conectando em ${bluetoothDevice.name || "micro:bit"}...`, "idle");
 
+      setStage("connecting gatt");
+      setStatus(`Conectando em ${bluetoothDevice.name || "dispositivo BLE"}...`, "idle");
       const server = await bluetoothDevice.gatt.connect();
+
+      setStage("getting uart service");
       const uartService = await server.getPrimaryService(UART_SERVICE_UUID);
 
-      rxCharacteristic = await uartService.getCharacteristic(UART_RX_CHARACTERISTIC_UUID);
+      if (mode === "app") {
+        try {
+          rxCharacteristic = await uartService.getCharacteristic(UART_RX_CHARACTERISTIC_UUID);
+          appendLog("Característica RX encontrada.");
+        } catch (error) {
+          rxCharacteristic = null;
+          appendLog(`RX não encontrada ou indisponível: ${getErrorMessage(error)}`);
+        }
+      }
+
+      setStage("getting tx characteristic");
       txCharacteristic = await uartService.getCharacteristic(UART_TX_CHARACTERISTIC_UUID);
-      txCharacteristic.addEventListener("characteristicvaluechanged", handleNotification);
+      activeNotificationHandler = mode === "minimal" ? handleMinimalNotification : handleNotification;
+      txCharacteristic.addEventListener("characteristicvaluechanged", activeNotificationHandler);
+
+      setStage("starting notifications");
       await txCharacteristic.startNotifications();
 
       setConnectedState(true);
+      setStage("connected");
       setStatus(`Conectado: ${bluetoothDevice.name || "micro:bit"}. Aguardando dados...`, "connected");
+      appendLog("Notificações TX ativas.");
     } catch (error) {
-      cleanupConnection();
+      recordError(error);
+      resetConnectionState();
       setConnectedState(false);
       setStatus(`Falha ao conectar: ${getErrorMessage(error)}`, "error");
     }
   }
 
   function disconnectMicrobit() {
-    if (txCharacteristic) {
-      txCharacteristic.removeEventListener("characteristicvaluechanged", handleNotification);
-    }
-
     if (bluetoothDevice?.gatt?.connected) {
       bluetoothDevice.gatt.disconnect();
       return;
@@ -163,38 +237,77 @@
   }
 
   function handleDisconnected() {
-    cleanupConnection();
+    resetConnectionState();
     setConnectedState(false);
+    setStage("disconnected");
     setStatus("micro:bit desconectado.", "idle");
+    appendLog("Dispositivo desconectado.");
   }
 
-  function cleanupConnection() {
-    if (txCharacteristic) {
-      txCharacteristic.removeEventListener("characteristicvaluechanged", handleNotification);
+  function resetConnectionState() {
+    if (txCharacteristic && activeNotificationHandler) {
+      txCharacteristic.removeEventListener("characteristicvaluechanged", activeNotificationHandler);
+    }
+
+    if (bluetoothDevice) {
+      bluetoothDevice.removeEventListener("gattserverdisconnected", handleDisconnected);
+    }
+
+    if (bluetoothDevice?.gatt?.connected) {
+      bluetoothDevice.gatt.disconnect();
     }
 
     receiveBuffer = "";
     txCharacteristic = null;
     rxCharacteristic = null;
+    activeNotificationHandler = null;
+    bluetoothDevice = null;
+  }
 
-    if (bluetoothDevice) {
-      bluetoothDevice.removeEventListener("gattserverdisconnected", handleDisconnected);
-    }
+  function setButtonsAvailable(isAvailable) {
+    ui.connectButton.disabled = !isAvailable;
+    ui.minimalBleButton.disabled = !isAvailable;
+    ui.disconnectButton.disabled = true;
   }
 
   function setConnectingState(isConnecting) {
     ui.connectButton.disabled = isConnecting;
+    ui.minimalBleButton.disabled = isConnecting;
     ui.disconnectButton.disabled = true;
   }
 
   function setConnectedState(isConnected) {
-    ui.connectButton.disabled = isConnected || !hasBluetoothSupport;
+    const canConnect = hasBluetoothSupport && hasSecureContext;
+
+    ui.connectButton.disabled = isConnected || !canConnect;
+    ui.minimalBleButton.disabled = isConnected || !canConnect;
     ui.disconnectButton.disabled = !isConnected;
   }
 
   function handleNotification(event) {
+    if (currentStage !== "receiving data") {
+      setStage("receiving data");
+      appendLog("Primeiros dados recebidos no app principal.");
+    }
+
     const chunk = decoder.decode(event.target.value);
     handleIncomingText(chunk);
+  }
+
+  function handleMinimalNotification(event) {
+    if (currentStage !== "receiving data") {
+      setStage("receiving data");
+      appendLog("Primeiros dados recebidos no teste mínimo.");
+    }
+
+    minimalText += decoder.decode(event.target.value);
+
+    if (minimalText.length > MAX_MINIMAL_TEXT_CHARS) {
+      minimalText = minimalText.slice(-MAX_MINIMAL_TEXT_CHARS);
+    }
+
+    ui.minimalData.textContent = minimalText;
+    ui.minimalData.scrollTop = ui.minimalData.scrollHeight;
   }
 
   function handleIncomingText(chunk) {
@@ -210,6 +323,7 @@
     if (receiveBuffer.length > MAX_BUFFER_CHARS) {
       receiveBuffer = "";
       setStatus("Buffer BLE limpo: dados incompletos passaram de 500 caracteres.", "error");
+      appendLog("Buffer parcial BLE excedeu 500 caracteres e foi limpo.");
     }
   }
 
@@ -329,6 +443,7 @@
     updateMetrics();
     scheduleDraw();
     setStatus(`App calibrado. Offset: ${formatNumber(zeroOffset)} mg.`, getConnectionStatusType());
+    appendLog(`App calibrado com offset ${formatNumber(zeroOffset)} mg.`);
   }
 
   function clearData() {
@@ -341,6 +456,7 @@
     updateMetrics();
     scheduleDraw();
     setStatus("Dados locais limpos. O offset de calibração foi mantido.", getConnectionStatusType());
+    appendLog("Dados locais limpos.");
   }
 
   function clearWaveState() {
@@ -382,6 +498,7 @@
     link.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
     setStatus(`CSV gerado com ${csvCount.toLocaleString("pt-BR")} linhas.`, getConnectionStatusType());
+    appendLog(`CSV gerado com ${csvCount.toLocaleString("pt-BR")} linhas.`);
   }
 
   function updateMetrics() {
@@ -535,6 +652,53 @@
     ui.body.dataset.connection = type === "connected" ? "connected" : type === "error" ? "error" : "idle";
   }
 
+  function setStage(stage) {
+    currentStage = stage;
+    setDiagnosticText("diagStage", stage);
+    appendLog(`Etapa: ${stage}`);
+  }
+
+  function updateDeviceDiagnostics(device) {
+    setDiagnosticText("diagDeviceName", device?.name || "(sem nome)");
+    setDiagnosticText("diagDeviceId", device?.id || "(sem id)");
+    appendLog(`Dispositivo escolhido: ${device?.name || "(sem nome)"}.`);
+  }
+
+  function setDiagnosticText(key, value) {
+    if (ui[key]) {
+      ui[key].textContent = value;
+    }
+  }
+
+  function appendLog(message) {
+    if (!ui.diagLog) {
+      return;
+    }
+
+    const time = new Date().toLocaleTimeString("pt-BR", { hour12: false });
+    logLines.push(`[${time}] ${message}`);
+
+    if (logLines.length > MAX_LOG_LINES) {
+      logLines.shift();
+    }
+
+    ui.diagLog.textContent = logLines.join("\n");
+    ui.diagLog.scrollTop = ui.diagLog.scrollHeight;
+  }
+
+  function clearLastError() {
+    ui.diagError.textContent = "nenhum erro";
+  }
+
+  function recordError(error) {
+    const name = error?.name || "Error";
+    const message = error?.message || String(error || "erro desconhecido");
+    const stack = error?.stack || "(sem stack)";
+
+    ui.diagError.textContent = `name: ${name}\nmessage: ${message}\nstack:\n${stack}`;
+    appendLog(`Erro ${name}: ${message}`);
+  }
+
   function getConnectionStatusType() {
     return bluetoothDevice?.gatt?.connected ? "connected" : "idle";
   }
@@ -544,15 +708,36 @@
       return "erro desconhecido";
     }
 
-    if (error.name === "NotFoundError") {
-      return "nenhum micro:bit foi selecionado";
+    switch (error.name) {
+      case "NotFoundError":
+        return "usuário cancelou ou nenhum dispositivo foi selecionado";
+      case "NotAllowedError":
+        return "permissão de Bluetooth negada";
+      case "SecurityError":
+        return "página não está em HTTPS/local seguro";
+      case "NetworkError":
+        return "falha ao conectar GATT; possível pareamento antigo ou BLE travado";
+      case "NotSupportedError":
+        return "navegador sem suporte suficiente a Web Bluetooth";
+      default:
+        return error.message || String(error);
     }
+  }
 
-    if (error.name === "NotAllowedError") {
-      return "permissão de Bluetooth negada";
-    }
+  function detectBrowser() {
+    const ua = navigator.userAgent || "";
 
-    return error.message || String(error);
+    if (/Bluefy/i.test(ua)) return "Bluefy";
+    if (/Edg\//.test(ua)) return "Microsoft Edge";
+    if (/CriOS/i.test(ua)) return "Chrome iOS";
+    if (/Chrome\//.test(ua)) return "Chrome/Chromium";
+    if (/Firefox\//.test(ua)) return "Firefox";
+    if (/Safari\//.test(ua)) return "Safari";
+    return ua.slice(0, 90) || "desconhecido";
+  }
+
+  function detectPlatform() {
+    return navigator.userAgentData?.platform || navigator.platform || "desconhecida";
   }
 
   function clamp(value, min, max) {

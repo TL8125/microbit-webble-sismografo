@@ -28,6 +28,7 @@
 
       <section class="toolbar" aria-label="Controles do sismógrafo">
         <button id="connectButton" class="button button--primary" type="button">Conectar micro:bit</button>
+        <button id="minimalBleButton" class="button" type="button">Teste BLE mínimo</button>
         <button id="disconnectButton" class="button" type="button" disabled>Desconectar</button>
         <button id="calibrateButton" class="button" type="button">Calibrar app</button>
         <button id="clearButton" class="button" type="button">Limpar</button>
@@ -66,6 +67,67 @@
           <span id="offsetBadge" class="offset-badge">offset: 0 mg</span>
         </div>
         <canvas id="waveCanvas" aria-label="Gráfico da onda de vibração" role="img"></canvas>
+      </section>
+
+      <section class="diagnostics" aria-label="Diagnóstico Bluetooth">
+        <div class="chart-header">
+          <div>
+            <h2>Diagnóstico BLE</h2>
+            <p>Use este painel para separar problema de conexão BLE de problema de gráfico ou parser.</p>
+          </div>
+          <a class="text-link" href="diagnostics.html">Abrir diagnóstico isolado</a>
+        </div>
+
+        <div class="diagnostic-grid">
+          <div class="diagnostic-item">
+            <span>navigator.bluetooth</span>
+            <strong id="diagBluetooth">verificando...</strong>
+          </div>
+          <div class="diagnostic-item">
+            <span>getAvailability()</span>
+            <strong id="diagAvailability">verificando...</strong>
+          </div>
+          <div class="diagnostic-item">
+            <span>HTTPS ou localhost</span>
+            <strong id="diagSecure">verificando...</strong>
+          </div>
+          <div class="diagnostic-item">
+            <span>Navegador</span>
+            <strong id="diagBrowser">verificando...</strong>
+          </div>
+          <div class="diagnostic-item">
+            <span>Plataforma</span>
+            <strong id="diagPlatform">verificando...</strong>
+          </div>
+          <div class="diagnostic-item">
+            <span>Dispositivo</span>
+            <strong id="diagDeviceName">nenhum</strong>
+          </div>
+          <div class="diagnostic-item">
+            <span>ID do dispositivo</span>
+            <strong id="diagDeviceId">nenhum</strong>
+          </div>
+          <div class="diagnostic-item">
+            <span>Etapa atual</span>
+            <strong id="diagStage">checking support</strong>
+          </div>
+        </div>
+
+        <div class="diagnostic-panels">
+          <div>
+            <h3>Logs</h3>
+            <pre id="diagLog" class="log-box" aria-live="polite"></pre>
+          </div>
+          <div>
+            <h3>Dados do teste mínimo</h3>
+            <pre id="minimalData" class="log-box" aria-live="polite"></pre>
+          </div>
+        </div>
+
+        <div>
+          <h3>Último erro completo</h3>
+          <pre id="diagError" class="log-box log-box--error">nenhum erro</pre>
+        </div>
       </section>
 
       <section class="notes" aria-label="Orientações rápidas">

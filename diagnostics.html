@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#070b12">
+    <title>Diagnóstico BLE micro:bit</title>
+    <link rel="stylesheet" href="style.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero" aria-labelledby="page-title">
+        <div class="hero__content">
+          <p class="eyebrow">Teste BLE isolado</p>
+          <h1 id="page-title">Diagnóstico BLE micro:bit</h1>
+          <p class="subtitle">
+            Página mínima para abrir o seletor Bluetooth, conectar ao UART BLE e mostrar qualquer texto recebido.
+          </p>
+        </div>
+        <div class="status-panel" aria-live="polite">
+          <span class="status-dot" aria-hidden="true"></span>
+          <div>
+            <p class="status-label">Status</p>
+            <p id="diagStatus" class="status-text">Inicializando...</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="toolbar" aria-label="Controles de diagnóstico">
+        <button id="selectButton" class="button button--primary" type="button">Abrir seletor BLE</button>
+        <button id="connectButton" class="button" type="button">Conectar UART</button>
+        <button id="disconnectButton" class="button" type="button" disabled>Desconectar</button>
+        <a class="button" href="index.html">Voltar ao sismógrafo</a>
+      </section>
+
+      <section class="diagnostics" aria-label="Diagnóstico Bluetooth">
+        <div class="diagnostic-grid">
+          <div class="diagnostic-item">
+            <span>navigator.bluetooth</span>
+            <strong id="diagBluetooth">verificando...</strong>
+          </div>
+          <div class="diagnostic-item">
+            <span>getAvailability()</span>
+            <strong id="diagAvailability">verificando...</strong>
+          </div>
+          <div class="diagnostic-item">
+            <span>HTTPS ou localhost</span>
+            <strong id="diagSecure">verificando...</strong>
+          </div>
+          <div class="diagnostic-item">
+            <span>Navegador</span>
+            <strong id="diagBrowser">verificando...</strong>
+          </div>
+          <div class="diagnostic-item">
+            <span>Plataforma</span>
+            <strong id="diagPlatform">verificando...</strong>
+          </div>
+          <div class="diagnostic-item">
+            <span>Dispositivo</span>
+            <strong id="diagDeviceName">nenhum</strong>
+          </div>
+          <div class="diagnostic-item">
+            <span>ID do dispositivo</span>
+            <strong id="diagDeviceId">nenhum</strong>
+          </div>
+          <div class="diagnostic-item">
+            <span>Etapa atual</span>
+            <strong id="diagStage">checking support</strong>
+          </div>
+        </div>
+
+        <div class="diagnostic-panels">
+          <div>
+            <h3>Logs</h3>
+            <pre id="diagLog" class="log-box" aria-live="polite"></pre>
+          </div>
+          <div>
+            <h3>Dados recebidos</h3>
+            <pre id="receivedData" class="log-box" aria-live="polite"></pre>
+          </div>
+        </div>
+
+        <div>
+          <h3>Último erro completo</h3>
+          <pre id="diagError" class="log-box log-box--error">nenhum erro</pre>
+        </div>
+      </section>
+
+      <section class="notes" aria-label="Orientações rápidas">
+        <p>
+          Esta página usa `acceptAllDevices: true` e só depende do serviço UART BLE depois que você escolhe um dispositivo.
+        </p>
+      </section>
+    </main>
+
+    <script src="diagnostics.js" defer></script>
+  </body>
+</html>
