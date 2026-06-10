@@ -2,8 +2,8 @@
   "use strict";
 
   const UART_SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
-  const UART_RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
-  const UART_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+  const UART_TX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+  const UART_RX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
 
   const MAX_BUFFER_CHARS = 500;
   const MAX_WAVE_SAMPLES = 1000;
@@ -141,14 +141,19 @@
       setStatus("Conectado. Procurando serviço UART...", "idle");
 
       const service = await server.getPrimaryService(UART_SERVICE);
-      const selectedTxChar = await service.getCharacteristic(UART_TX);
+      const chars = await service.getCharacteristics();
+      const selectedTxChar = chars.find((char) => char.properties.notify || char.properties.indicate);
+
+      if (!selectedTxChar) {
+        throw new Error("Nenhuma característica notify/indicate encontrada.");
+      }
 
       selectedTxChar.addEventListener("characteristicvaluechanged", handleBleData);
       await selectedTxChar.startNotifications();
       txChar = selectedTxChar;
 
       setConnectedState(true);
-      setStatus(`Conectado a ${device.name || "micro:bit"}. Aguardando dados UART...`, "connected");
+      setStatus(`Conectado a ${device.name || "micro:bit"}. Ouvindo ${shortUuid(txChar.uuid)}...`, "connected");
     } catch (error) {
       cleanupConnection();
       setConnectedState(false);
@@ -639,6 +644,10 @@
       default:
         return error.message || String(error);
     }
+  }
+
+  function shortUuid(uuid) {
+    return String(uuid || "").slice(0, 8).toUpperCase();
   }
 
   function clamp(value, min, max) {
