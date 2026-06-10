@@ -44,7 +44,7 @@ O app mantém visíveis apenas amostras dentro dos últimos 10 segundos:
 samples = samples.filter(s => now - s.t <= visibleSeconds * 1000)
 ```
 
-As amostras antigas ficam transparentes progressivamente. Amostras novas aparecem fortes.
+A escala vertical usa somente as amostras visíveis, então sinais fracos também ocupam bem a altura do gráfico.
 
 ## BLE UART
 
@@ -121,11 +121,19 @@ timestamp_ms,key,raw_value,corrected_value
 
 O app mantém no máximo 20.000 linhas para download.
 
+## Gráfico
+
+O gráfico usa uma janela temporal de 10 segundos. Em 50 Hz, isso mantém cerca de 500 amostras visíveis por série.
+
+A escala vertical é recalculada com os valores visíveis. Ondas fracas são ampliadas automaticamente, e ondas fortes reduzem o zoom para caber no canvas.
+
+O modo **Tela cheia** mostra somente o gráfico, ocupando a tela inteira. Em navegadores iOS/Bluefy que recusam a Fullscreen API, o app aplica um fallback visual equivalente.
+
 ## Deploy
 
 ```bash
 git add .
-git commit -m "improve MakeCode style graphs with 50Hz fading window"
+git commit -m "remove chart fade and fullscreen graph only"
 git push
 ```
 

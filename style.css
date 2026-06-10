@@ -306,8 +306,8 @@ body[data-connection="error"] .status-dot {
 
 :fullscreen,
 body.fake-fullscreen {
-  overflow: auto;
-  background: var(--page);
+  overflow: hidden;
+  background: #000000;
 }
 
 body.fake-fullscreen {
@@ -320,26 +320,43 @@ body.fake-fullscreen {
 
 :fullscreen .app-shell,
 body.fake-fullscreen .app-shell {
-  width: min(100% - 20px, 1440px);
+  width: 100vw;
   height: 100vh;
   overflow: auto;
-  padding: 12px 0 20px;
+  margin: 0;
+  padding: 0;
 }
 
 :fullscreen .hero,
-body.fake-fullscreen .hero {
-  grid-template-columns: minmax(0, 1fr) minmax(240px, 320px);
-  margin-bottom: 8px;
+:fullscreen .toolbar,
+:fullscreen .metrics,
+:fullscreen .chart-header,
+:fullscreen .uart-test,
+body.fake-fullscreen .hero,
+body.fake-fullscreen .toolbar,
+body.fake-fullscreen .metrics,
+body.fake-fullscreen .chart-header,
+body.fake-fullscreen .uart-test {
+  display: none;
 }
 
-:fullscreen h1,
-body.fake-fullscreen h1 {
-  font-size: clamp(1.7rem, 4vw, 3rem);
+:fullscreen .chart-section,
+body.fake-fullscreen .chart-section {
+  width: 100vw;
+  height: 100vh;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: #f3f4f6;
+  box-shadow: none;
 }
 
 :fullscreen #waveCanvas,
 body.fake-fullscreen #waveCanvas {
-  height: min(66vh, 720px);
+  width: 100vw;
+  height: 100vh;
+  border: 0;
+  border-radius: 0;
 }
 
 @media (max-width: 900px) {

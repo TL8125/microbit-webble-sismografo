@@ -249,6 +249,7 @@
     addCsvRow(timestamp, "total", parsed.rawValue, parsed.rawValue);
     updateMetrics();
     updateUartPanel();
+    scheduleDraw();
     return true;
   }
 
@@ -533,8 +534,9 @@
     ctx.fillStyle = "#f3f4f6";
     ctx.fillRect(0, 0, width, height);
 
-    const paddingX = 18;
-    const paddingY = 18;
+    const graphOnlyFullscreen = isGraphOnlyFullscreen();
+    const paddingX = graphOnlyFullscreen ? 8 : 18;
+    const paddingY = graphOnlyFullscreen ? 8 : 18;
     const chartWidth = width - paddingX * 2;
     const chartHeight = height - paddingY * 2;
     const centerY = paddingY + chartHeight / 2;
@@ -546,20 +548,29 @@
     ui.scaleMetric.textContent = `±${formatNumber(currentScale)} mg`;
 
     if (waveSamples.length < 2 && totalSamples.length < 2) {
-      drawEmptyState(ctx, width, centerY);
+      if (!graphOnlyFullscreen) {
+        drawEmptyState(ctx, width, centerY);
+      }
       return;
     }
 
-    drawFadingSeries(ctx, waveSamples, now, paddingX, chartWidth, centerY, chartHeight, "#1f77d0");
-    drawFadingSeries(ctx, totalSamples, now, paddingX, chartWidth, centerY, chartHeight, "#d83b61");
-    drawValueBadge(ctx, `wave ${formatNumber(lastWave)}`, paddingX + 12, paddingY + 12, "#f59e0b");
+    drawSeries(ctx, waveSamples, now, paddingX, chartWidth, centerY, chartHeight, "#1f77d0");
+    drawSeries(ctx, totalSamples, now, paddingX, chartWidth, centerY, chartHeight, "#d83b61");
 
-    if (totalSamples.length > 0) {
-      drawValueBadge(ctx, `total ${formatNumber(lastTotal)}`, paddingX + 132, paddingY + 12, "#f97316");
+    if (!graphOnlyFullscreen) {
+      drawValueBadge(ctx, `wave ${formatNumber(lastWave)}`, paddingX + 12, paddingY + 12, "#f59e0b");
+
+      if (totalSamples.length > 0) {
+        drawValueBadge(ctx, `total ${formatNumber(lastTotal)}`, paddingX + 132, paddingY + 12, "#f97316");
+      }
     }
   }
 
-  function drawFadingSeries(ctx, samples, now, paddingX, chartWidth, centerY, chartHeight, color) {
+  function isGraphOnlyFullscreen() {
+    return Boolean(document.fullscreenElement || fakeFullscreen);
+  }
+
+  function drawSeries(ctx, samples, now, paddingX, chartWidth, centerY, chartHeight, color) {
     if (samples.length < 2) {
       return;
     }
@@ -579,8 +590,6 @@
         continue;
       }
 
-      const alpha = Math.max(0.08, 1 - age / VISIBLE_MS);
-      ctx.globalAlpha = alpha;
       ctx.beginPath();
       ctx.moveTo(sampleX(previous.t, now, paddingX, chartWidth), sampleY(previous.value, centerY, chartHeight));
       ctx.lineTo(sampleX(current.t, now, paddingX, chartWidth), sampleY(current.value, centerY, chartHeight));
@@ -660,8 +669,8 @@
       ...totalSamples.map((sample) => sample.value),
     ];
 
-    const maxAbs = Math.max(50, ...visibleValues.map((value) => Math.abs(value)));
-    return niceScale(maxAbs * 1.12);
+    const maxAbs = Math.max(1, ...visibleValues.map((value) => Math.abs(value)));
+    return niceScale(Math.max(5, maxAbs * 1.2));
   }
 
   function niceScale(value) {
