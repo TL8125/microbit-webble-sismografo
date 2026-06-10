@@ -6,9 +6,11 @@
   const UART_RX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
 
   const MAX_BUFFER_CHARS = 500;
-  const MAX_WAVE_SAMPLES = 1000;
   const MAX_RAW_CALIBRATION_SAMPLES = 200;
   const MAX_CSV_ROWS = 20000;
+  const VISIBLE_SECONDS = 10;
+  const VISIBLE_MS = VISIBLE_SECONDS * 1000;
+  const SIMULATION_INTERVAL_MS = 20;
 
   const telemetryPattern = /^([a-zA-Z]+)\s*:\s*(-?(?:\d+(?:[.,]\d+)?|[.,]\d+))\s*$/;
   const decoder = new TextDecoder("utf-8");
@@ -21,7 +23,6 @@
   let zeroOffset = 0;
   let lastWave = 0;
   let lastTotal = 0;
-  let rmsSumSquares = 0;
   let currentScale = 10;
   let packetCount = 0;
   let lastLine = "";
@@ -29,9 +30,8 @@
   let fakeFullscreen = false;
   let animationFrameId = 0;
 
-  const waveSamples = new Array(MAX_WAVE_SAMPLES);
-  let waveStart = 0;
-  let waveCount = 0;
+  let waveSamples = [];
+  let totalSamples = [];
 
   const rawWaveSamples = new Array(MAX_RAW_CALIBRATION_SAMPLES);
   let rawWaveStart = 0;
@@ -230,12 +230,13 @@
     ui.lastLine.textContent = lastLine;
 
     const timestamp = Date.now();
+    const sampleTime = performance.now();
 
     if (parsed.key === "wave") {
       const correctedValue = parsed.rawValue - zeroOffset;
       lastWave = correctedValue;
       addRawWaveSample(parsed.rawValue);
-      addWaveSample(correctedValue);
+      addWaveSample(correctedValue, sampleTime);
       addCsvRow(timestamp, "wave", parsed.rawValue, correctedValue);
       updateMetrics();
       updateUartPanel();
@@ -244,6 +245,7 @@
     }
 
     lastTotal = parsed.rawValue;
+    addTotalSample(parsed.rawValue, sampleTime);
     addCsvRow(timestamp, "total", parsed.rawValue, parsed.rawValue);
     updateMetrics();
     updateUartPanel();
@@ -277,18 +279,19 @@
     return Number.isFinite(rawValue) ? { key, rawValue } : null;
   }
 
-  function addWaveSample(value) {
-    if (waveCount < MAX_WAVE_SAMPLES) {
-      waveSamples[(waveStart + waveCount) % MAX_WAVE_SAMPLES] = value;
-      waveCount += 1;
-    } else {
-      const removed = waveSamples[waveStart];
-      rmsSumSquares -= removed * removed;
-      waveSamples[waveStart] = value;
-      waveStart = (waveStart + 1) % MAX_WAVE_SAMPLES;
-    }
+  function addWaveSample(value, t = performance.now()) {
+    waveSamples.push({ t, value });
+    trimVisibleSamples(t);
+  }
 
-    rmsSumSquares += value * value;
+  function addTotalSample(value, t = performance.now()) {
+    totalSamples.push({ t, value });
+    trimVisibleSamples(t);
+  }
+
+  function trimVisibleSamples(now = performance.now()) {
+    waveSamples = waveSamples.filter((sample) => now - sample.t <= VISIBLE_MS);
+    totalSamples = totalSamples.filter((sample) => now - sample.t <= VISIBLE_MS);
   }
 
   function addRawWaveSample(value) {
@@ -356,9 +359,8 @@
   }
 
   function clearWaveState() {
-    waveStart = 0;
-    waveCount = 0;
-    rmsSumSquares = 0;
+    waveSamples = [];
+    totalSamples = [];
     currentScale = 10;
   }
 
@@ -407,12 +409,14 @@
 
     simulationTimer = window.setInterval(() => {
       const wave = Math.round(Math.sin(step / 6) * 38 + Math.sin(step / 2.7) * 8);
+      const total = Math.abs(wave) + Math.round(8 + Math.sin(step / 9) * 5);
       processLine(`wave:${wave}`);
+      processLine(`total:${total}`);
       ui.lastPacket.textContent = `wave:${wave}\\n`;
       packetCount += 1;
       ui.packetCount.textContent = String(packetCount);
       step += 1;
-    }, 50);
+    }, SIMULATION_INTERVAL_MS);
   }
 
   function stopSimulation() {
@@ -465,14 +469,30 @@
   }
 
   function updateMetrics() {
-    const rms = waveCount > 0 ? Math.sqrt(rmsSumSquares / waveCount) : 0;
+    const now = performance.now();
+    trimVisibleSamples(now);
+    const rms = calculateRms(waveSamples);
 
     ui.waveMetric.textContent = `${formatNumber(lastWave)} mg`;
     ui.totalMetric.textContent = `${formatNumber(lastTotal)} mg`;
     ui.rmsMetric.textContent = `${formatNumber(rms)} mg`;
-    ui.samplesMetric.textContent = waveCount.toLocaleString("pt-BR");
+    ui.samplesMetric.textContent = waveSamples.length.toLocaleString("pt-BR");
     ui.scaleMetric.textContent = `±${formatNumber(currentScale)} mg`;
     ui.offsetBadge.textContent = `offset: ${formatNumber(zeroOffset)} mg`;
+  }
+
+  function calculateRms(samples) {
+    if (samples.length === 0) {
+      return 0;
+    }
+
+    let sumSquares = 0;
+
+    for (const sample of samples) {
+      sumSquares += sample.value * sample.value;
+    }
+
+    return Math.sqrt(sumSquares / samples.length);
   }
 
   function updateUartPanel() {
@@ -510,7 +530,7 @@
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = "#070b12";
+    ctx.fillStyle = "#f3f4f6";
     ctx.fillRect(0, 0, width, height);
 
     const paddingX = 18;
@@ -519,43 +539,84 @@
     const chartHeight = height - paddingY * 2;
     const centerY = paddingY + chartHeight / 2;
 
+    const now = performance.now();
+    trimVisibleSamples(now);
     drawGrid(ctx, width, height, paddingX, paddingY, chartWidth, chartHeight, centerY);
     currentScale = getVisibleScale();
     ui.scaleMetric.textContent = `±${formatNumber(currentScale)} mg`;
 
-    if (waveCount < 2) {
+    if (waveSamples.length < 2 && totalSamples.length < 2) {
       drawEmptyState(ctx, width, centerY);
       return;
     }
 
-    ctx.save();
-    ctx.beginPath();
-    ctx.lineWidth = 2.4;
-    ctx.strokeStyle = "#2ee8b6";
-    ctx.shadowColor = "rgba(46, 232, 182, 0.36)";
-    ctx.shadowBlur = 10;
+    drawFadingSeries(ctx, waveSamples, now, paddingX, chartWidth, centerY, chartHeight, "#1f77d0");
+    drawFadingSeries(ctx, totalSamples, now, paddingX, chartWidth, centerY, chartHeight, "#d83b61");
+    drawValueBadge(ctx, `wave ${formatNumber(lastWave)}`, paddingX + 12, paddingY + 12, "#f59e0b");
 
-    for (let index = 0; index < waveCount; index += 1) {
-      const value = waveSamples[(waveStart + index) % MAX_WAVE_SAMPLES];
-      const x = paddingX + (index / (waveCount - 1)) * chartWidth;
-      const normalized = clamp(value / currentScale, -1, 1);
-      const y = centerY - normalized * (chartHeight / 2);
+    if (totalSamples.length > 0) {
+      drawValueBadge(ctx, `total ${formatNumber(lastTotal)}`, paddingX + 132, paddingY + 12, "#f97316");
+    }
+  }
 
-      if (index === 0) {
-        ctx.moveTo(x, y);
-      } else {
-        ctx.lineTo(x, y);
-      }
+  function drawFadingSeries(ctx, samples, now, paddingX, chartWidth, centerY, chartHeight, color) {
+    if (samples.length < 2) {
+      return;
     }
 
-    ctx.stroke();
+    ctx.save();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = color;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    for (let index = 1; index < samples.length; index += 1) {
+      const previous = samples[index - 1];
+      const current = samples[index];
+      const age = now - current.t;
+
+      if (age > VISIBLE_MS) {
+        continue;
+      }
+
+      const alpha = Math.max(0.08, 1 - age / VISIBLE_MS);
+      ctx.globalAlpha = alpha;
+      ctx.beginPath();
+      ctx.moveTo(sampleX(previous.t, now, paddingX, chartWidth), sampleY(previous.value, centerY, chartHeight));
+      ctx.lineTo(sampleX(current.t, now, paddingX, chartWidth), sampleY(current.value, centerY, chartHeight));
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  function sampleX(t, now, paddingX, chartWidth) {
+    const age = clamp(now - t, 0, VISIBLE_MS);
+    return paddingX + chartWidth - (age / VISIBLE_MS) * chartWidth;
+  }
+
+  function sampleY(value, centerY, chartHeight) {
+    const normalized = clamp(value / currentScale, -1, 1);
+    return centerY - normalized * (chartHeight / 2);
+  }
+
+  function drawValueBadge(ctx, text, x, y, color) {
+    ctx.save();
+    ctx.font = "700 13px system-ui, sans-serif";
+    const width = Math.ceil(ctx.measureText(text).width) + 18;
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.95;
+    ctx.fillRect(x, y, width, 28);
+    ctx.fillStyle = "#ffffff";
+    ctx.globalAlpha = 1;
+    ctx.fillText(text, x + 9, y + 19);
     ctx.restore();
   }
 
   function drawGrid(ctx, width, height, paddingX, paddingY, chartWidth, chartHeight, centerY) {
     ctx.save();
     ctx.lineWidth = 1;
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+    ctx.strokeStyle = "#d6d9de";
 
     for (let index = 0; index <= 10; index += 1) {
       const x = paddingX + (chartWidth / 10) * index;
@@ -573,7 +634,7 @@
       ctx.stroke();
     }
 
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.28)";
+    ctx.strokeStyle = "#aeb4bd";
     ctx.beginPath();
     ctx.moveTo(paddingX, centerY);
     ctx.lineTo(width - paddingX, centerY);
@@ -583,28 +644,24 @@
 
   function drawEmptyState(ctx, width, centerY) {
     ctx.save();
-    ctx.fillStyle = "rgba(238, 244, 255, 0.62)";
+    ctx.fillStyle = "#5b6472";
     ctx.font = "600 15px system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.fillText("Aguardando amostras de wave...", width / 2, centerY - 14);
-    ctx.fillStyle = "rgba(159, 176, 199, 0.78)";
+    ctx.fillStyle = "#7b8492";
     ctx.font = "400 13px system-ui, sans-serif";
     ctx.fillText("Use Simular onda ou conecte o micro:bit.", width / 2, centerY + 12);
     ctx.restore();
   }
 
   function getVisibleScale() {
-    let maxAmplitude = 0;
+    const visibleValues = [
+      ...waveSamples.map((sample) => sample.value),
+      ...totalSamples.map((sample) => sample.value),
+    ];
 
-    for (let index = 0; index < waveCount; index += 1) {
-      const value = Math.abs(waveSamples[(waveStart + index) % MAX_WAVE_SAMPLES]);
-
-      if (value > maxAmplitude) {
-        maxAmplitude = value;
-      }
-    }
-
-    return niceScale(Math.max(10, maxAmplitude * 1.15));
+    const maxAbs = Math.max(50, ...visibleValues.map((value) => Math.abs(value)));
+    return niceScale(maxAbs * 1.12);
   }
 
   function niceScale(value) {

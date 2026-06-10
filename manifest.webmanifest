@@ -3,7 +3,7 @@
   "short_name": "Sismógrafo",
   "start_url": ".",
   "display": "fullscreen",
-  "background_color": "#07101f",
-  "theme_color": "#07101f",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
   "icons": []
 }
