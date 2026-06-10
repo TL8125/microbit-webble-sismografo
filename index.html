@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#070b12">
+    <title>Microbit Sismógrafo</title>
+    <link rel="stylesheet" href="style.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero" aria-labelledby="page-title">
+        <div class="hero__content">
+          <p class="eyebrow">BLE UART + Canvas</p>
+          <h1 id="page-title">Microbit Sismógrafo</h1>
+          <p class="subtitle">
+            Receba leituras do acelerômetro do micro:bit por Web Bluetooth e visualize a onda de vibração em tempo real.
+          </p>
+        </div>
+        <div class="status-panel" aria-live="polite">
+          <span class="status-dot" aria-hidden="true"></span>
+          <div>
+            <p class="status-label">Status</p>
+            <p id="connectionStatus" class="status-text">Inicializando...</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="toolbar" aria-label="Controles do sismógrafo">
+        <button id="connectButton" class="button button--primary" type="button">Conectar micro:bit</button>
+        <button id="disconnectButton" class="button" type="button" disabled>Desconectar</button>
+        <button id="calibrateButton" class="button" type="button">Calibrar app</button>
+        <button id="clearButton" class="button" type="button">Limpar</button>
+        <button id="downloadButton" class="button" type="button">Baixar CSV</button>
+      </section>
+
+      <section class="metrics" aria-label="Métricas em tempo real">
+        <article class="metric-card">
+          <span class="metric-label">wave</span>
+          <strong id="waveMetric">0 mg</strong>
+        </article>
+        <article class="metric-card">
+          <span class="metric-label">total</span>
+          <strong id="totalMetric">0 mg</strong>
+        </article>
+        <article class="metric-card">
+          <span class="metric-label">RMS</span>
+          <strong id="rmsMetric">0 mg</strong>
+        </article>
+        <article class="metric-card">
+          <span class="metric-label">amostras</span>
+          <strong id="samplesMetric">0</strong>
+        </article>
+        <article class="metric-card">
+          <span class="metric-label">escala atual</span>
+          <strong id="scaleMetric">±10 mg</strong>
+        </article>
+      </section>
+
+      <section class="chart-section" aria-label="Gráfico da onda de vibração">
+        <div class="chart-header">
+          <div>
+            <h2>Onda em tempo real</h2>
+            <p>Últimas 1000 amostras corrigidas pelo offset do app.</p>
+          </div>
+          <span id="offsetBadge" class="offset-badge">offset: 0 mg</span>
+        </div>
+        <canvas id="waveCanvas" aria-label="Gráfico da onda de vibração" role="img"></canvas>
+      </section>
+
+      <section class="notes" aria-label="Orientações rápidas">
+        <p>
+          Use Chrome ou Edge em computador/Android. No iPhone, use um navegador com Web BLE, como Bluefy.
+          Safari iOS comum não expõe Web Bluetooth para este fluxo.
+        </p>
+      </section>
+    </main>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>
