@@ -1,0 +1,174 @@
+﻿<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Raw BLE micro:bit</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      background: #07101f;
+      color: white;
+      padding: 16px;
+    }
+    button {
+      font-size: 18px;
+      padding: 14px;
+      margin: 6px 0;
+      width: 100%;
+      border-radius: 12px;
+    }
+    pre {
+      background: #111f3d;
+      padding: 12px;
+      border-radius: 12px;
+      white-space: pre-wrap;
+      min-height: 160px;
+    }
+    .box {
+      background: #0d1830;
+      padding: 12px;
+      border-radius: 12px;
+      margin-top: 12px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Raw BLE micro:bit</h1>
+
+  <button onclick="connect()">Conectar micro:bit</button>
+  <button onclick="clearLog()">Limpar log</button>
+
+  <div class="box">
+    <b>Status:</b>
+    <div id="status">Aguardando...</div>
+  </div>
+
+  <div class="box">
+    <b>Último pacote bruto:</b>
+    <pre id="lastPacket"></pre>
+  </div>
+
+  <div class="box">
+    <b>Log:</b>
+    <pre id="log"></pre>
+  </div>
+
+<script>
+const UART_SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const UART_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+
+let device;
+let server;
+let service;
+let txChar;
+let packets = 0;
+
+function $(id) {
+  return document.getElementById(id);
+}
+
+function setStatus(msg) {
+  $("status").textContent = msg;
+  log(msg);
+}
+
+function log(msg) {
+  const t = new Date().toLocaleTimeString();
+  $("log").textContent += `[${t}] ${msg}\n`;
+}
+
+function clearLog() {
+  $("log").textContent = "";
+  $("lastPacket").textContent = "";
+}
+
+function decodeData(value) {
+  try {
+    return new TextDecoder("utf-8").decode(value);
+  } catch (e) {
+    let s = "";
+    for (let i = 0; i < value.byteLength; i++) {
+      s += String.fromCharCode(value.getUint8(i));
+    }
+    return s;
+  }
+}
+
+function onData(event) {
+  packets++;
+  const text = decodeData(event.target.value);
+
+  $("lastPacket").textContent = text;
+  log(`PACOTE ${packets}: ${JSON.stringify(text)}`);
+}
+
+async function connect() {
+  try {
+    clearLog();
+
+    if (!navigator.bluetooth) {
+      setStatus("ERRO: navigator.bluetooth não existe neste navegador.");
+      return;
+    }
+
+    setStatus("Abrindo seletor BLE...");
+
+    device = await navigator.bluetooth.requestDevice({
+      acceptAllDevices: true,
+      optionalServices: [UART_SERVICE]
+    });
+
+    setStatus("Dispositivo escolhido: " + (device.name || "(sem nome)"));
+
+    device.addEventListener("gattserverdisconnected", () => {
+      setStatus("Desconectado.");
+    });
+
+    setStatus("Conectando GATT...");
+    server = await device.gatt.connect();
+
+    setStatus("Pegando serviço UART...");
+    service = await server.getPrimaryService(UART_SERVICE);
+
+    setStatus("Listando características...");
+    const chars = await service.getCharacteristics();
+
+    for (const c of chars) {
+      log(
+        "Characteristic: " + c.uuid +
+        " notify=" + c.properties.notify +
+        " indicate=" + c.properties.indicate +
+        " read=" + c.properties.read +
+        " write=" + c.properties.write
+      );
+    }
+
+    txChar = chars.find(c => c.uuid.toLowerCase() === UART_TX);
+    if (!txChar) {
+      txChar = chars.find(c => c.properties.notify || c.properties.indicate);
+    }
+
+    if (!txChar) {
+      setStatus("ERRO: nenhuma característica notify/indicate encontrada.");
+      return;
+    }
+
+    setStatus("Usando característica: " + txChar.uuid);
+
+    txChar.addEventListener("characteristicvaluechanged", onData);
+    txChar.oncharacteristicvaluechanged = onData;
+
+    setStatus("Ativando notificações...");
+    await txChar.startNotifications();
+
+    setStatus("Conectado e escutando. Agora aguarde dados wave...");
+  } catch (err) {
+    console.error(err);
+    setStatus("ERRO: " + err.name + " - " + err.message);
+    log(err.stack || String(err));
+  }
+}
+</script>
+</body>
+</html>
