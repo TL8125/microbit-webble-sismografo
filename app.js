@@ -1,9 +1,9 @@
 (() => {
   "use strict";
 
-  const UART_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
-  const UART_RX_CHARACTERISTIC_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
-  const UART_TX_CHARACTERISTIC_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+  const UART_SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+  const UART_RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+  const UART_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
 
   const MAX_BUFFER_CHARS = 500;
   const MAX_WAVE_SAMPLES = 1000;
@@ -11,6 +11,7 @@
   const MAX_CSV_ROWS = 20000;
   const MAX_LOG_LINES = 120;
   const MAX_MINIMAL_TEXT_CHARS = 5000;
+  const MAX_RAW_TEXT_CHARS = 8000;
 
   const telemetryPattern = /^([a-zA-Z]+)\s*:\s*(-?(?:\d+(?:[.,]\d+)?|[.,]\d+))\s*$/;
   const decoder = new TextDecoder("utf-8");
@@ -23,6 +24,7 @@
   let rxCharacteristic = null;
   let activeNotificationHandler = null;
   let receiveBuffer = "";
+  let rawReceivedText = "";
   let minimalText = "";
   let hasBluetoothSupport = false;
   let hasSecureContext = false;
@@ -66,6 +68,8 @@
     ui.status = document.getElementById("connectionStatus");
     ui.connectButton = document.getElementById("connectButton");
     ui.minimalBleButton = document.getElementById("minimalBleButton");
+    ui.fullscreenButton = document.getElementById("fullscreenButton");
+    ui.orientationButton = document.getElementById("orientationButton");
     ui.disconnectButton = document.getElementById("disconnectButton");
     ui.calibrateButton = document.getElementById("calibrateButton");
     ui.clearButton = document.getElementById("clearButton");
@@ -89,11 +93,14 @@
     ui.diagLog = document.getElementById("diagLog");
     ui.diagError = document.getElementById("diagError");
     ui.minimalData = document.getElementById("minimalData");
+    ui.rawData = document.getElementById("rawData");
   }
 
   function bindActions() {
     ui.connectButton.addEventListener("click", () => connectUart("app"));
     ui.minimalBleButton.addEventListener("click", () => connectUart("minimal"));
+    ui.fullscreenButton.addEventListener("click", enterFullscreen);
+    ui.orientationButton.addEventListener("click", lockLandscape);
     ui.disconnectButton.addEventListener("click", disconnectMicrobit);
     ui.calibrateButton.addEventListener("click", calibrateApp);
     ui.clearButton.addEventListener("click", clearData);
@@ -184,7 +191,7 @@
 
       bluetoothDevice = await navigator.bluetooth.requestDevice({
         acceptAllDevices: true,
-        optionalServices: [UART_SERVICE_UUID],
+        optionalServices: [UART_SERVICE],
       });
 
       updateDeviceDiagnostics(bluetoothDevice);
@@ -193,13 +200,15 @@
       setStage("connecting gatt");
       setStatus(`Conectando em ${bluetoothDevice.name || "dispositivo BLE"}...`, "idle");
       const server = await bluetoothDevice.gatt.connect();
+      appendLog("Conectado ao GATT.");
 
       setStage("getting uart service");
-      const uartService = await server.getPrimaryService(UART_SERVICE_UUID);
+      const uartService = await server.getPrimaryService(UART_SERVICE);
+      appendLog("Serviço UART encontrado.");
 
       if (mode === "app") {
         try {
-          rxCharacteristic = await uartService.getCharacteristic(UART_RX_CHARACTERISTIC_UUID);
+          rxCharacteristic = await uartService.getCharacteristic(UART_RX);
           appendLog("Característica RX encontrada.");
         } catch (error) {
           rxCharacteristic = null;
@@ -208,12 +217,15 @@
       }
 
       setStage("getting tx characteristic");
-      txCharacteristic = await uartService.getCharacteristic(UART_TX_CHARACTERISTIC_UUID);
+      txCharacteristic = await uartService.getCharacteristic(UART_TX);
+      appendLog("Característica TX encontrada.");
       activeNotificationHandler = mode === "minimal" ? handleMinimalNotification : handleNotification;
-      txCharacteristic.addEventListener("characteristicvaluechanged", activeNotificationHandler);
 
       setStage("starting notifications");
       await txCharacteristic.startNotifications();
+      appendLog("Notifications ativadas.");
+      txCharacteristic.addEventListener("characteristicvaluechanged", activeNotificationHandler);
+      appendLog("Listener characteristicvaluechanged registrado.");
 
       setConnectedState(true);
       setStage("connected");
@@ -284,23 +296,75 @@
     ui.disconnectButton.disabled = !isConnected;
   }
 
+  async function enterFullscreen() {
+    const target = document.documentElement;
+
+    if (!target.requestFullscreen) {
+      appendLog("Fullscreen API não disponível neste navegador.");
+      setStatus("Tela cheia não disponível neste navegador.", getConnectionStatusType());
+      return;
+    }
+
+    try {
+      if (!document.fullscreenElement) {
+        await target.requestFullscreen();
+        appendLog("Tela cheia ativada.");
+        setStatus("Tela cheia ativada.", getConnectionStatusType());
+      }
+
+      scheduleDraw();
+    } catch (error) {
+      recordError(error);
+      setStatus(`Falha ao ativar tela cheia: ${getErrorMessage(error)}`, "error");
+    }
+  }
+
+  async function lockLandscape() {
+    try {
+      if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+        await document.documentElement.requestFullscreen();
+        appendLog("Tela cheia ativada antes de travar orientação.");
+      }
+
+      if (!screen.orientation?.lock) {
+        appendLog("Orientation Lock API não disponível neste navegador.");
+        setStatus("Travamento de rotação não disponível. Gire o celular manualmente.", getConnectionStatusType());
+        return;
+      }
+
+      await screen.orientation.lock("landscape");
+      appendLog("Orientação travada em modo horizontal.");
+      setStatus("Orientação travada em modo horizontal.", getConnectionStatusType());
+      scheduleDraw();
+    } catch (error) {
+      recordError(error);
+      setStatus(`Falha ao travar orientação: ${getErrorMessage(error)}`, "error");
+    }
+  }
+
   function handleNotification(event) {
+    const chunk = decoder.decode(event.target.value);
+
     if (currentStage !== "receiving data") {
       setStage("receiving data");
       appendLog("Primeiros dados recebidos no app principal.");
     }
 
-    const chunk = decoder.decode(event.target.value);
+    appendRawText(chunk);
+    appendLog(`Último pacote recebido: ${JSON.stringify(chunk)}`);
     handleIncomingText(chunk);
   }
 
   function handleMinimalNotification(event) {
+    const chunk = decoder.decode(event.target.value);
+
     if (currentStage !== "receiving data") {
       setStage("receiving data");
       appendLog("Primeiros dados recebidos no teste mínimo.");
     }
 
-    minimalText += decoder.decode(event.target.value);
+    minimalText += chunk;
+    appendLog(`Último pacote recebido no teste mínimo: ${JSON.stringify(chunk)}`);
 
     if (minimalText.length > MAX_MINIMAL_TEXT_CHARS) {
       minimalText = minimalText.slice(-MAX_MINIMAL_TEXT_CHARS);
@@ -308,6 +372,17 @@
 
     ui.minimalData.textContent = minimalText;
     ui.minimalData.scrollTop = ui.minimalData.scrollHeight;
+  }
+
+  function appendRawText(chunk) {
+    rawReceivedText += chunk;
+
+    if (rawReceivedText.length > MAX_RAW_TEXT_CHARS) {
+      rawReceivedText = rawReceivedText.slice(-MAX_RAW_TEXT_CHARS);
+    }
+
+    ui.rawData.textContent = rawReceivedText;
+    ui.rawData.scrollTop = ui.rawData.scrollHeight;
   }
 
   function handleIncomingText(chunk) {
@@ -449,6 +524,10 @@
   function clearData() {
     clearWaveState();
     clearCsvRows();
+    rawReceivedText = "";
+    minimalText = "";
+    ui.rawData.textContent = "";
+    ui.minimalData.textContent = "";
     rawWaveStart = 0;
     rawWaveCount = 0;
     lastWave = 0;

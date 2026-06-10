@@ -29,6 +29,8 @@
       <section class="toolbar" aria-label="Controles do sismógrafo">
         <button id="connectButton" class="button button--primary" type="button">Conectar micro:bit</button>
         <button id="minimalBleButton" class="button" type="button">Teste BLE mínimo</button>
+        <button id="fullscreenButton" class="button" type="button">Tela cheia</button>
+        <button id="orientationButton" class="button" type="button">Travar horizontal</button>
         <button id="disconnectButton" class="button" type="button" disabled>Desconectar</button>
         <button id="calibrateButton" class="button" type="button">Calibrar app</button>
         <button id="clearButton" class="button" type="button">Limpar</button>
@@ -122,6 +124,11 @@
             <h3>Dados do teste mínimo</h3>
             <pre id="minimalData" class="log-box" aria-live="polite"></pre>
           </div>
+        </div>
+
+        <div>
+          <h3>Texto bruto recebido no app principal</h3>
+          <pre id="rawData" class="log-box" aria-live="polite"></pre>
         </div>
 
         <div>
